@@ -467,9 +467,13 @@ class TransPoseH(nn.Module):
         self.global_encoder = TransformerEncoder(
             encoder_layer, encoder_layers_num)
 
+        if not cfg.MODEL.TARGET_TYPE=='offset':
+            factor=1
+        else:
+            factor=3
         self.final_layer = nn.Conv2d(
             in_channels=d_model,
-            out_channels=cfg['MODEL']['NUM_JOINTS'],
+            out_channels=cfg['MODEL']['NUM_JOINTS']*factor,
             kernel_size=extra['FINAL_CONV_KERNEL'],
             stride=1,
             padding=1 if extra['FINAL_CONV_KERNEL'] == 3 else 0

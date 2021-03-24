@@ -35,7 +35,7 @@ MODEL:
   NAME: transpose_h
   NUM_JOINTS: 17
   PRETRAINED: 'models/pytorch/imagenet/hrnet_w32-36af842e.pth'
-  TARGET_TYPE: gaussian
+  TARGET_TYPE: 'offset' # gaussian
   IMAGE_SIZE:
   - 192
   - 256

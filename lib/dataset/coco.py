@@ -2,7 +2,6 @@
 # Copyright (c) Microsoft
 # Licensed under the MIT License.
 # Written by Bin Xiao (Bin.Xiao@microsoft.com)
-# Modified by Hanbin Dai (daihanbin.ac@gmail.com) and Feng Zhang (zhangfengwcy@gmail.com)
 # ------------------------------------------------------------------------------
 
 from __future__ import absolute_import
@@ -168,7 +167,7 @@ class COCODataset(JointsDataset):
             x2 = np.min((width - 1, x1 + np.max((0, w - 1))))
             y2 = np.min((height - 1, y1 + np.max((0, h - 1))))
             if obj['area'] > 0 and x2 >= x1 and y2 >= y1:
-                obj['clean_bbox'] = [x1, y1, x2-x1+1, y2-y1+1]
+                obj['clean_bbox'] = [x1, y1, x2-x1, y2-y1]
                 valid_objs.append(obj)
         objs = valid_objs
 
@@ -214,8 +213,8 @@ class COCODataset(JointsDataset):
 
     def _xywh2cs(self, x, y, w, h):
         center = np.zeros((2), dtype=np.float32)
-        center[0] = x + (w - 1) * 0.5
-        center[1] = y + (h - 1) * 0.5
+        center[0] = x + w * 0.5
+        center[1] = y + h * 0.5
 
         if w > self.aspect_ratio * h:
             h = w * 1.0 / self.aspect_ratio

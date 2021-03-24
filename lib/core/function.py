@@ -2,7 +2,6 @@
 # Copyright (c) Microsoft
 # Licensed under the MIT License.
 # Written by Bin Xiao (Bin.Xiao@microsoft.com)
-# Modified by Hanbin Dai (daihanbin.ac@gmail.com) and Feng Zhang (zhangfengwcy@gmail.com)
 # ------------------------------------------------------------------------------
 
 from __future__ import absolute_import
@@ -18,7 +17,7 @@ import torch
 
 from core.evaluate import accuracy
 from core.inference import get_final_preds
-from utils.transforms import flip_back
+from utils.transforms import flip_back,flip_back_offset
 from utils.vis import save_debug_images
 
 
@@ -30,6 +29,9 @@ def train(config, train_loader, model, criterion, optimizer, epoch,
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
+    if config.MODEL.TARGET_TYPE == 'offset':
+        losses_hm = AverageMeter()
+        losses_os = AverageMeter()
     acc = AverageMeter()
 
     # switch to train mode
@@ -47,14 +49,27 @@ def train(config, train_loader, model, criterion, optimizer, epoch,
         target_weight = target_weight.cuda(non_blocking=True)
 
         if isinstance(outputs, list):
-            loss = criterion(outputs[0], target, target_weight)
-            for output in outputs[1:]:
-                loss += criterion(output, target, target_weight)
+            if config.MODEL.TARGET_TYPE == 'gaussian':
+                loss = criterion(outputs[0], target, target_weight)
+                for output in outputs[1:]:
+                    loss += criterion(output, target, target_weight)
+            elif config.MODEL.TARGET_TYPE == 'offset':
+                loss_hm,loss_os = criterion(outputs[0], target, target_weight)
+                for output in outputs[1:]:
+                    loss_hm_t, loss_os_t = criterion(output, target, target_weight)
+                    loss_hm+= loss_hm_t
+                    loss_os+= loss_os_t
+                loss = loss_hm + loss_os
         else:
             output = outputs
-            loss = criterion(output, target, target_weight)
-
+            if config.MODEL.TARGET_TYPE == 'gaussian':
+                loss = criterion(output, target, target_weight)
+            elif config.MODEL.TARGET_TYPE == 'offset':
+                loss_hm,loss_os = criterion(output, target, target_weight)
+                loss = loss_hm+loss_os
         # loss = criterion(output, target, target_weight)
+
+
 
         # compute gradient and do update step
         optimizer.zero_grad()
@@ -63,25 +78,26 @@ def train(config, train_loader, model, criterion, optimizer, epoch,
 
         # measure accuracy and record loss
         losses.update(loss.item(), input.size(0))
+        if config.MODEL.TARGET_TYPE == 'offset':
+            losses_hm.update(loss_hm.item(), input.size(0))
+            losses_os.update(loss_os.item(), input.size(0))
 
-        _, avg_acc, cnt, pred = accuracy(output.detach().cpu().numpy(),
-                                         target.detach().cpu().numpy())
-        acc.update(avg_acc, cnt)
+        # _, avg_acc, cnt, pred = accuracy(output.detach().cpu().numpy(),
+        #                                  target.detach().cpu().numpy())
+        # acc.update(avg_acc, cnt)
 
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
 
         if i % config.PRINT_FREQ == 0:
-            msg = 'Epoch: [{0}][{1}/{2}]\t' \
-                  'Time {batch_time.val:.3f}s ({batch_time.avg:.3f}s)\t' \
-                  'Speed {speed:.1f} samples/s\t' \
-                  'Data {data_time.val:.3f}s ({data_time.avg:.3f}s)\t' \
-                  'Loss {loss.val:.5f} ({loss.avg:.5f})\t' \
-                  'Accuracy {acc.val:.3f} ({acc.avg:.3f})'.format(
+            msg = 'Epoch: [{0}][{1}/{2}]  Speed {speed:.1f}/s  Ls {loss_val:.1f}({loss_avg:.1f})  '.format(
                       epoch, i, len(train_loader), batch_time=batch_time,
-                      speed=input.size(0)/batch_time.val,
-                      data_time=data_time, loss=losses, acc=acc)
+                      speed=input.size(0)/batch_time.val, loss_val=losses.val * 10**5, loss_avg = losses.avg * 10**5)
+            if config.MODEL.TARGET_TYPE == 'offset':
+                msg = msg + 'Ls_hm {loss_hm_val:.1f}({loss_hm_avg:.1f})  Ls_os {loss_os_val:.1f}({loss_os_avg:.1f})'.format(
+                     loss_hm_val=losses_hm.val * 10**5,loss_hm_avg=losses_hm.avg * 10**5,
+                     loss_os_val=losses_os.val * 10**5,loss_os_avg=losses_os.avg * 10**5)
             logger.info(msg)
 
             writer = writer_dict['writer']
@@ -90,7 +106,7 @@ def train(config, train_loader, model, criterion, optimizer, epoch,
             writer.add_scalar('train_acc', acc.val, global_steps)
             writer_dict['train_global_steps'] = global_steps + 1
 
-            prefix = '{}_{}'.format(os.path.join(output_dir, 'train'), i)
+            # prefix = '{}_{}'.format(os.path.join(output_dir, 'train'), i)
             # save_debug_images(config, input, meta, target, pred*4, output,
             #                   prefix)
 
@@ -99,6 +115,9 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
              tb_log_dir, writer_dict=None):
     batch_time = AverageMeter()
     losses = AverageMeter()
+    if config.MODEL.TARGET_TYPE == 'offset':
+        losses_hm = AverageMeter()
+        losses_os = AverageMeter()
     acc = AverageMeter()
 
     # switch to evaluate mode
@@ -135,23 +154,38 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
                     output_flipped = outputs_flipped[-1]
                 else:
                     output_flipped = outputs_flipped
+                if config.MODEL.TARGET_TYPE == 'gaussian':
+                    output_flipped = flip_back(output_flipped.cpu().numpy(),
+                                               val_dataset.flip_pairs)
+                elif config.MODEL.TARGET_TYPE == 'offset':
+                    output_flipped = flip_back_offset(output_flipped.cpu().numpy(),
+                                               val_dataset.flip_pairs)
 
-                output_flipped = flip_back(output_flipped.cpu().numpy(),
-                                           val_dataset.flip_pairs)
                 output_flipped = torch.from_numpy(output_flipped.copy()).cuda()
 
                 output = (output + output_flipped) * 0.5
 
             target = target.cuda(non_blocking=True)
             target_weight = target_weight.cuda(non_blocking=True)
+            if config.MODEL.TARGET_TYPE == 'gaussian':
+                loss = criterion(output, target, target_weight)
+            elif config.MODEL.TARGET_TYPE == 'offset':
 
-            loss = criterion(output, target, target_weight)
-
+                loss_hm, loss_os = criterion(output, target, target_weight)
+                loss = loss_hm + loss_os
             num_images = input.size(0)
             # measure accuracy and record loss
             losses.update(loss.item(), num_images)
-            _, avg_acc, cnt, pred = accuracy(output.cpu().numpy(),
-                                             target.cpu().numpy())
+            if config.MODEL.TARGET_TYPE == 'offset':
+                losses_hm.update(loss_hm.item(), num_images)
+                losses_os.update(loss_os.item(), num_images)
+            if config.MODEL.TARGET_TYPE == 'gaussian':
+                _, avg_acc, cnt, pred = accuracy(output.cpu().numpy(),
+                                                 target.cpu().numpy())
+            elif config.MODEL.TARGET_TYPE == 'offset':
+                _, avg_acc, cnt, pred = accuracy(output.cpu().numpy()[:, ::3, :, :],
+                                                 target.cpu().numpy()[:, ::3,:, :])
+
 
             acc.update(avg_acc, cnt)
 
@@ -163,7 +197,7 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
             s = meta['scale'].numpy()
             score = meta['score'].numpy()
 
-            preds, maxvals = get_final_preds(
+            preds, maxvals,preds_in_input_space = get_final_preds(
                 config, output.clone().cpu().numpy(), c, s)
 
             all_preds[idx:idx + num_images, :, 0:2] = preds[:, :, 0:2]
@@ -189,7 +223,7 @@ def validate(config, val_loader, val_dataset, model, criterion, output_dir,
                 prefix = '{}_{}'.format(
                     os.path.join(output_dir, 'val'), i
                 )
-                save_debug_images(config, input, meta, target, pred*4, output,
+                save_debug_images(config, input, meta, target, preds_in_input_space, output,
                                   prefix)
 
         name_values, perf_indicator = val_dataset.evaluate(

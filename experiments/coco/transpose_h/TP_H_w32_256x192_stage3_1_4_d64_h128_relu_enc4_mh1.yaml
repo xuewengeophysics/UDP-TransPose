@@ -34,7 +34,7 @@ MODEL:
   INIT_WEIGHTS: true
   NAME: transpose_h
   NUM_JOINTS: 17
-  PRETRAINED: 'models/pytorch/imagenet/hrnet_w32-36af842e.pth'
+  PRETRAINED: '' # 'models/pytorch/imagenet/hrnet_w32-36af842e.pth'
   TARGET_TYPE: 'offset' # gaussian
   IMAGE_SIZE:
   - 192
@@ -82,7 +82,7 @@ MODEL:
 LOSS:
   USE_TARGET_WEIGHT: true
 TRAIN:
-  BATCH_SIZE_PER_GPU: 16
+  BATCH_SIZE_PER_GPU: 4
   SHUFFLE: true
   BEGIN_EPOCH: 0
   END_EPOCH: 240

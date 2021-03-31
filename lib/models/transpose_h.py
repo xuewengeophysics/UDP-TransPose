@@ -449,7 +449,18 @@ class TransPoseH(nn.Module):
         self.transition2 = self._make_transition_layer(
             pre_stage_channels, num_channels)
         self.stage3, pre_stage_channels = self._make_stage(
-            self.stage3_cfg, num_channels, multi_scale_output=False)
+            self.stage3_cfg, num_channels)
+
+        self.stage4_cfg = extra['STAGE4']
+        num_channels = self.stage4_cfg['NUM_CHANNELS']
+        block = blocks_dict[self.stage4_cfg['BLOCK']]
+        num_channels = [
+            num_channels[i] * block.expansion for i in range(len(num_channels))
+        ]
+        self.transition3 = self._make_transition_layer(
+            pre_stage_channels, num_channels)
+        self.stage4, pre_stage_channels = self._make_stage(
+            self.stage4_cfg, num_channels, multi_scale_output=False)
 
         d_model = cfg.MODEL.DIM_MODEL
         dim_feedforward = cfg.MODEL.DIM_FEEDFORWARD
@@ -643,6 +654,14 @@ class TransPoseH(nn.Module):
             else:
                 x_list.append(y_list[i])
         y_list = self.stage3(x_list)
+
+        x_list = []
+        for i in range(self.stage4_cfg['NUM_BRANCHES']):
+            if self.transition3[i] is not None:
+                x_list.append(self.transition3[i](y_list[-1]))
+            else:
+                x_list.append(y_list[i])
+        y_list = self.stage4(x_list)
 
         x = self.reduce(y_list[0])
         bs, c, h, w = x.shape

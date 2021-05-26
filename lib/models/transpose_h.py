@@ -462,13 +462,14 @@ class TransPoseH(nn.Module):
         self.stage4, pre_stage_channels = self._make_stage(
             self.stage4_cfg, num_channels, multi_scale_output=False)
 
-        d_model = cfg.MODEL.DIM_MODEL
-        dim_feedforward = cfg.MODEL.DIM_FEEDFORWARD
-        encoder_layers_num = cfg.MODEL.ENCODER_LAYERS
-        n_head = cfg.MODEL.N_HEAD
-        pos_embedding_type = cfg.MODEL.POS_EMBEDDING
-        w, h = cfg.MODEL.IMAGE_SIZE
+        d_model = cfg.MODEL.DIM_MODEL #DIM_MODEL为64
+        dim_feedforward = cfg.MODEL.DIM_FEEDFORWARD #DIM_FEEDFORWARD为128
+        encoder_layers_num = cfg.MODEL.ENCODER_LAYERS #ENCODER_LAYERS为4
+        n_head = cfg.MODEL.N_HEAD #ENCODER_LAYERS为1
+        pos_embedding_type = cfg.MODEL.POS_EMBEDDING #POS_EMBEDDING为sine
+        w, h = cfg.MODEL.IMAGE_SIZE #w, h为192, 256
 
+        ##pre_stage_channels为[32, 64, 128, 256]
         self.reduce = nn.Conv2d(pre_stage_channels[0], d_model, 1, bias=False)
         self._make_position_embedding(w, h, d_model, pos_embedding_type)
 
@@ -499,9 +500,9 @@ class TransPoseH(nn.Module):
             logger.info("==> Without any PositionEmbedding~")
         else:
             with torch.no_grad():
-                self.pe_h = h // 4
-                self.pe_w = w // 4
-                length = self.pe_h * self.pe_w
+                self.pe_h = h // 4 #h为256, self.pe_h为64
+                self.pe_w = w // 4 #w为192, self.pe_w为48
+                length = self.pe_h * self.pe_w #length为3072
             if pe_type == 'learnable':
                 self.pos_embedding = nn.Parameter(
                     torch.randn(length, 1, d_model))
@@ -514,10 +515,10 @@ class TransPoseH(nn.Module):
 
     def _make_sine_position_embedding(self, d_model, temperature=10000,
                                       scale=2 * math.pi):
-        h, w = self.pe_h, self.pe_w
+        h, w = self.pe_h, self.pe_w #self.pe_h为64, self.pe_w为48
         area = torch.ones(1, h, w)  # [b, h, w]
-        y_embed = area.cumsum(1, dtype=torch.float32)
-        x_embed = area.cumsum(2, dtype=torch.float32)
+        y_embed = area.cumsum(1, dtype=torch.float32) #沿h方向进行累加，第1行为1、最后1行为64
+        x_embed = area.cumsum(2, dtype=torch.float32) #沿w方向进行累加，第2列为1、最后1列为48
 
         one_direction_feats = d_model // 2
 
@@ -663,9 +664,9 @@ class TransPoseH(nn.Module):
                 x_list.append(y_list[i])
         y_list = self.stage4(x_list)
 
-        x = self.reduce(y_list[0])
-        bs, c, h, w = x.shape
-        x = x.flatten(2).permute(2, 0, 1)
+        x = self.reduce(y_list[0]) #卷积后，输出特征的通道数是64
+        bs, c, h, w = x.shape #c为64，h为64，w为48
+        x = x.flatten(2).permute(2, 0, 1) #变换后，x.shape为torch.Size([3072, 2, 64])
         x = self.global_encoder(x, pos=self.pos_embedding)
         x = x.permute(1, 2, 0).contiguous().view(bs, c, h, w)
         x = self.final_layer(x)
